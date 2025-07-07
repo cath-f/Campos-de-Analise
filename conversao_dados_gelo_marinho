@@ -1,0 +1,82 @@
+# Script de conversão de conversão de concentração para extensão de dados de gelo marinho antartico 
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Wed Mar  6 16:43:03 2024
+
+@author: catharine
+"""
+import xarray as xr
+import pyproj
+import numpy as np
+import matplotlib.pyplot as plt
+import cartopy.crs as ccrs
+import cartopy.feature as cfeature
+import pandas as pd
+from matplotlib.patches import PathPatch
+from matplotlib.path import Path
+
+
+# Carregar o dataset - ubuntu (caso use windowns, mudar o formato)
+g = xr.open_dataset('/home/catharine/2_IC_NSIDC_SETEMBRO_V4/NSIDC_PS_v4_81_20.nc', engine="netcdf4")
+
+#Extraindo dados faltantes 1100 e 1200 (dados em porcentagem)
+g['N07_ICECON'] = g['N07_ICECON'].where((g['N07_ICECON'] != 1.1) & (g['N07_ICECON'] != 1.2), np.nan)
+
+transformer = pyproj.Transformer.from_crs("EPSG:3412", "EPSG:4326", always_xy=True)
+
+# Extrair coordenadas X e Y
+x = g['x'].values
+y = g['y'].values
+
+# Converter X e Y para latitude e longitude
+lon, lat = np.meshgrid(x, y)
+lon, lat = transformer.transform(lon, lat)
+
+# Criar um novo conjunto de dados com as coordenadas lat/lon
+g = g.assign_coords(lon=(["y", "x"], lon), lat=(["y", "x"], lat))
+
+# Definir os limites da área de interesse
+lon_min, lon_max = -130,-61  # Limites de longitude
+lat_min, lat_max = -90, -30  # Limites de latitude
+
+# Recortar o domínio para a região especificada
+g_area = g.where((g.lon >= lon_min) & (g.lon <= lon_max) &
+                  (g.lat >= lat_min) & (g.lat <= lat_max), drop=True)
+
+n=np.max(g_area['N07_ICECON'])*0.15 # encontra o valor referente aos 15%
+
+# Pixels com concentração de gelo > 15% como 1, os outros como 0
+g_binary = xr.where(g_area['N07_ICECON'] > n, 1, 0)
+
+# Somar o número de pixels com concentração > 15% em cada time-step
+num_pixels_15 = g_binary.sum(dim=('x', 'y'))
+
+# Converter a área total para km²
+conversion_factor = 625  # km² por pixel
+area_km2 = (num_pixels_15 * conversion_factor).round()
+
+# Adicionar o resultado ao dataset como uma nova variável
+g['N07_ICECON_area_km2'] = area_km2
+
+# Calcular a média da área em km² ao longo do tempo
+media = area_km2.mean(dim='time')
+
+# Calcular a diferença entre cada timestep e a média
+diferenca = area_km2 - media
+
+# Adicionar a diferença como uma nova variável no dataset
+g['N07_ICECON_diff_km2'] = diferenca
+
+# Extrair anos da dimensão 'time'
+anos = g['time'].dt.year
+
+# Criar uma tabela de valores para visualização
+for ano, area, diff in zip(anos.values, area_km2.values, diferenca.values):
+    print(f"Ano: {ano}, Área de Gelo (km²): {area:.2f}, Diferença da Média (km²): {diff:.2f}")
+
+# Visualizar dado em planilha excel associado aos anos
+dados = pd.DataFrame({
+    "Ano": anos.values,
+    "Área de Gelo (km²)": area_km2.values,
+    "Diferença da Média (km²)": diferenca.values})
