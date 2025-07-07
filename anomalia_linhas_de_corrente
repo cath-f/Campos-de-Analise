@@ -1,0 +1,221 @@
+# Anomalias de Linhas de Corrente em 850hPa
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Fri Dec 27 14:32:35 2024
+
+@author: catharine
+"""
+# Importando bibliotecas 
+import cartopy.crs as ccrs
+import cartopy.feature as cfeature
+import matplotlib.pyplot as plt
+import matplotlib.colors 
+import metpy.calc as mpcalc
+from metpy.units import units
+import numpy as np
+import xarray as xr
+import cartopy.io.shapereader as shpreader # Import shapefiles
+import cmocean
+import matplotlib.colors as mcolors
+
+# ignora avisos
+import warnings
+warnings.filterwarnings("ignore")
+
+""" Script de Anomalia de Linhas de Corrente em 850hPa ;) """
+
+# Abrindo os dados das componentes u e v
+file_1 = xr.open_mfdataset(
+    '/home/catharine/2_IC_DADOS/era5_vento_u_850_hpa.nc'
+    ).metpy.parse_cf().sel(valid_time=slice('1991-09-01T00:00:00',
+                                      '2020-09-01T00:00:00')) #'2024-05-12T18:00:00'
+file_2 = xr.open_mfdataset(
+    '/home/catharine/2_IC_DADOS/era5_vento_v_850_hpa.nc'
+    ).metpy.parse_cf().sel(valid_time=slice('1991-09-01T00:00:00',
+                                      '2020-09-01T00:00:00'))
+
+# Converte longitude
+file_1 = file_1.assign_coords(dict(
+    longitude=(((file_1.longitude.values + 180) % 360) - 180))
+).sortby('longitude')
+
+file_2 = file_2.assign_coords(dict(
+    longitude=(((file_2.longitude.values + 180) % 360) - 180))
+).sortby('longitude')
+
+# Obtendo lon e lat
+lon = file_1['longitude'].values
+lat = file_1['latitude'].values
+
+# Criação de grade bidimensional a partir de lon e lat
+lon_grid, lat_grid = np.meshgrid(lon, lat)   
+
+# Converte longitude para o intervalo de 0 a 360
+file_1 = file_1.assign_coords(dict(
+    longitude=((file_1.longitude.values))  # Ajuste para 0 a 360
+)).sortby('longitude')
+
+file_2 = file_2.assign_coords(dict(
+    longitude=((file_2.longitude.values))  # Ajuste para 0 a 360
+)).sortby('longitude')
+
+# Obtendo lon e lat
+lon = file_1['longitude'].values
+lat = file_1['latitude'].values
+
+# Criação de grade bidimensional a partir de lon e lat
+lon_grid, lat_grid = np.meshgrid(lon, lat)
+
+# Escalas de cores -------------------
+# Linhas geopotencial em 500 hPa
+colors = ["#0000CD","#FF0000"]
+cmap_1 = matplotlib.colors.LinearSegmentedColormap.from_list("", colors)
+cmap_1.set_over("#FF0000")
+cmap_1.set_under("#0000CD")
+
+# Espessura
+colors = ["#2d001c", "#5b0351", "#780777", "#480a5e", "#1e1552", 
+          "#1f337d", "#214c9f", "#2776c6", "#2fa5f1", "#1bad1d", 
+          "#8ad900", "#ffec00", "#ffab00", "#f46300", "#de3b00", 
+          "#ab1900", "#6b0200", '#3c0000']
+
+cmap_2 = matplotlib.colors.LinearSegmentedColormap.from_list("", colors)
+cmap_2.set_over('#3c0000')
+cmap_2.set_under('#28000a')
+
+# Umidade especifica
+# define os intervalos da legenda
+clevs = np.array([2, 4, 6, 8, 10, 12, 14, 16, 18])
+
+# lista de cores, em ordem crescete. RGBA
+colors = np.array([ # (R, G, B, A)
+    [242, 98, 0, 255],
+    [249, 155, 77, 255],
+    [254, 217, 118, 255],
+    [255, 247, 188, 255],
+    [190, 220, 230, 255],
+    [156, 194, 255, 255],
+    [59, 118, 255, 255],
+    [0, 77, 182, 255]
+]) / 255 # divide por 255
+
+# cria um novo cmap a partir do pre-existente
+cmap_3 = mcolors.LinearSegmentedColormap.from_list(
+    'specific humidity cmap', colors, clevs.shape[0] - 1)
+cmap_3.set_over(np.array([0, 37, 89, 255])/255)
+cmap_3.set_under('white')
+
+# normaliza com base nos intervalos
+norm = mcolors.BoundaryNorm(clevs, cmap_3.N) # usado no PColorMesh
+
+# ------------------------------------
+
+# Climatologia
+clima_u = np.mean(file_1['u'], axis=0)
+clima_v = np.mean(file_2['v'], axis=0)
+
+# Listas de anos
+anos_list = {
+    'anos_1': [], # Adicionar os anos 
+    'anos_2': [],
+    }
+
+# Loop para calcular compostos e plotar
+for key, anos in anos_list.items():
+    # Seleciona os dados dos anos especificados
+    dados_u = file_1.sel(valid_time=file_1['valid_time'].dt.year.isin(anos))
+    dados_v = file_2.sel(valid_time=file_2['valid_time'].dt.year.isin(anos))
+    
+    # Calcula os compostos
+    composto_u = np.squeeze((dados_u['u'].mean(dim='valid_time')) - clima_u)
+    composto_v = np.squeeze((dados_v['v'].mean(dim='valid_time')) - clima_v)
+    
+
+    # escolha o tamanho do plot em polegadas (largura x altura)
+    plt.figure(figsize=(25,25))
+    
+    # usando a projeção da coordenada cilindrica equidistante 
+    ax = plt.axes(projection=ccrs.PlateCarree(central_longitude=180, globe=None))
+
+    # Defina os limites do gráfico para América do Sul
+    ax.set_extent([-180, 180, 90, -90], crs=ccrs.PlateCarree())
+    gl = ax.gridlines(crs=ccrs.PlateCarree(),
+                      color='gray',
+                      alpha=1.0, 
+                      linestyle='--', 
+                      linewidth=0.5,
+                      xlocs=np.arange(-180, 181, 30), 
+                      ylocs=np.arange(-90, 91, 30), 
+                      draw_labels=True
+                      )
+    gl.top_labels = False
+    gl.right_labels = False
+    gl.xlabel_style = {'size': 29, 'color': 'black'}
+    gl.ylabel_style = {'size': 29, 'color': 'black'}
+    
+    # Calculo Corrente de jato 250 hPa
+    #mag_1 = np.sqrt(u_700**2+v_700**2)
+
+    # intevalos da corrente de jato
+    intervalo_min_5 = 30
+    intervalo_max_5 = 90
+    interval_5 = 10            # de quanto em quanto voce quer que varie
+    levels_5 = np.arange(intervalo_min_5, intervalo_max_5, interval_5)
+    
+    # # corrente de jato
+    # corrente_jato_sobreado = plt.contourf(lons,
+    #                    lats, 
+    #                    mag_1, 
+    #                    cmap=cmocean.cm.amp, 
+    #                    levels = levels_5, 
+    #                    extend='both')
+        
+    ax.streamplot(lon, 
+                  lat, 
+                  composto_u, 
+                  composto_v, 
+                  density=[4,4], 
+                  linewidth=1.5, 
+                  arrowsize=2.5,
+                  color='black', 
+                  transform=ccrs.PlateCarree())
+    
+    
+    #adicionando shapefile
+    # shapefile = list(
+    #     shpreader.Reader(
+    #     '/home/catharine/shapefiles/BR_UF_2021/BR_UF_2021.shp'
+    #     ).geometries()
+    #     )
+    
+    # ax.add_geometries(
+    #     shapefile, 
+    #     ccrs.PlateCarree(), 
+    #     edgecolor = 'blue', 
+    #     facecolor='none', 
+    #     linewidth=0.5
+    #     )
+    
+    # adiciona continente e bordas
+    ax.coastlines(resolution='10m', color='mediumblue', linewidth=2)
+    ax.add_feature(cfeature.BORDERS, edgecolor='mediumblue', linewidth=1)
+    # adiciona mascara de terra
+    #ax.add_feature(cfeature.LAND)
+    # # Títulos e legendas
+    # plt.title('Linhas de Corrente (m/s) - 850 hPa', fontweight='bold', fontsize=16, loc='center')
+    #previsao
+    # Add a title
+    plt.title('850 hPa',
+              fontweight='bold', 
+              fontsize=30, 
+              loc='right'
+              )
+
+    
+    #plt.show() #para testes sem salvar a imagem ;)
+
+    # Salva imagem
+    plt.savefig(f'/home/catharine/linha_de_corrente_850_{key}.png', bbox_inches='tight') 
+    plt.show()
+    plt.close()
