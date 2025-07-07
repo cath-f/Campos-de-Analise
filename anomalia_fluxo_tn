@@ -1,0 +1,297 @@
+#Adaptação Anomalia de Fluxo de Takaya e Nakamura (JAS,2001) e plot da função corrente
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Fri Jan  3 16:18:55 2025
+
+@author: catharine
+"""
+# Importando bibliotecas 
+
+import cartopy.crs as ccrs
+import cartopy.feature as cfeature
+import matplotlib.pyplot as plt
+import matplotlib.colors 
+import metpy.calc as mpcalc
+from metpy.units import units
+import numpy as np
+import xarray as xr
+import cartopy.io.shapereader as shpreader # Import shapefiles
+import cmocean
+import matplotlib.colors as mcolors
+import netCDF4 as nc
+from mpl_toolkits.basemap import Basemap,addcyclic
+from copy import copy
+from matplotlib.colors import LinearSegmentedColormap
+
+# ignora avisos
+import warnings
+warnings.filterwarnings("ignore")
+
+""" 
+Script de Anomalia de Fluxo de Takaya e Nakamura (JAS,2001) ;) 
+Fonte: https://github.com/laishenggx/T-N_Wave-Activity-Flux/blob/master/hor_tnf.py
+
+Orientações: 
+    1. Cortar o dado para sua area de dominio, HS. 
+    2. Diminuir a resolução do dado -> use o CDO ;)
+    
+Resoluções mais altas podem travar ou reiniciar o nucléo,
+devido ao calculo complexo das equações envolvendo lat e lon. 
+
+"""
+#Abrindo os dados
+#file_1 = nc.Dataset('/home/catharine/2_IC_DADOS/era5_2_hs_vento_u_250_hpa.nc')
+#file_2 = nc.Dataset('/home/catharine/2_IC_DADOS/era5_2_hs_vento_v_250_hpa.nc') 
+#file_3 = nc.Dataset('/home/catharine/2_IC_DADOS/era5_2_hs_geopotencial_250_hpa.nc') 
+
+file_1=xr.open_mfdataset(
+    '/home/catharine/2_IC_DADOS/era5_2_hs_vento_u_250_hpa.nc'
+    ).metpy.parse_cf().sel(valid_time=slice('1991-09-01T00:00:00',
+                                      '2020-09-01T00:00:00'))
+file_2=xr.open_mfdataset(
+    '/home/catharine/2_IC_DADOS/era5_2_hs_vento_v_250_hpa.nc'
+    ).metpy.parse_cf().sel(valid_time=slice('1991-09-01T00:00:00',
+                                      '2020-09-01T00:00:00'))                        
+file_3=xr.open_mfdataset(
+    '/home/catharine/2_IC_DADOS/era5_2_hs_geopotencial_250_hpa.nc'
+    ).metpy.parse_cf().sel(valid_time=slice('1991-09-01T00:00:00',
+                                      '2020-09-01T00:00:00'))
+   
+                                            
+a = 6.37e6  # Earth Radius
+omega = 7.292e-5  # Rotational angular velocity of the Earth
+g = 9,807
+
+#lon = file_1.variables['lon'][:]
+#lat = file_1.variables['lat'][:]
+
+lon = file_1['lon'].values
+lat = file_1['lat'].values
+
+
+# Iniciando os calculos
+
+# Climatologia
+clima_u = np.mean(file_1['u'], axis=0)
+clima_v = np.mean(file_2['v'], axis=0)
+clima_z = np.mean(file_3['z'], axis=0)
+
+# Listas de anos
+anos_list = {
+            'anos_1': [], #Adicionar os anos
+            'anos_2': [],
+            }
+
+# Loop para calcular compostos e plotar
+for key, anos in anos_list.items():
+    # Seleciona os dados dos anos especificados
+    dados_u = file_1.sel(valid_time=file_1['valid_time'].dt.year.isin(anos))
+    dados_v = file_2.sel(valid_time=file_2['valid_time'].dt.year.isin(anos))
+    dados_z = file_3.sel(valid_time=file_3['valid_time'].dt.year.isin(anos))
+
+    # Calcula os compostos
+    #anomalia_u = dados_u['u'].mean(dim='valid_time') - clima_u
+    #anomalia_v = dados_v['v'].mean(dim='valid_time') - clima_v
+    anomalia_z = dados_z['z'].mean(dim='valid_time') - clima_z
+
+    # Selecionando os dados para essas latitudes
+    #u_data = anomalia_u.variables['u'][:, :, :]
+    #v_data = anomalia_u.variables['v'][:, :, :]
+    #z_data = anomalia_u.variables['z'][:, :, :]
+    
+    u_data = clima_u.values
+    v_data = clima_v.values
+    z_data = anomalia_z.values
+
+    dlon = np.gradient(lon) * np.pi / 180.0
+    dlat = np.gradient(lat) * np.pi / 180.0
+    f = np.array(list(map(lambda x: 2 * omega * np.sin(x * np.pi / 180.0), lat)))  # Coriolis parameter: f=2*omega*sin(lat)
+    cos_lat = np.array(list(map(lambda x: np.cos(x * np.pi / 180.0), lat)))  # cos(lat)
+    
+    # Calculando médias
+    u_c = np.average(u_data, axis=0)
+    v_c = np.average(v_data, axis=0)
+    phi_c = np.average(z_data, axis=0)
+    
+##### Pertubation stream-function HELP
+##### psi_p = ((z_data[2, :, :] - phi_c).T / f).T
+    psi_p = ((z_data[0, :, :]).T / f).T
+    
+    #5 partial differential terms
+    dpsi_dlon=np.gradient(psi_p,dlon[1])[1]
+    dpsi_dlat=np.gradient(psi_p,dlat[1])[0]
+    d2psi_dlon2=np.gradient(dpsi_dlon,dlon[1])[1]
+    d2psi_dlat2=np.gradient(dpsi_dlat,dlat[1])[0]
+    d2psi_dlondlat=np.gradient(dpsi_dlat,dlon[1])[1]
+    
+    termxu=dpsi_dlon*dpsi_dlon-psi_p*d2psi_dlon2
+    termxv=dpsi_dlon*dpsi_dlat-psi_p*d2psi_dlondlat
+    termyv=dpsi_dlat*dpsi_dlat-psi_p*d2psi_dlat2
+    
+    # Calculando os termos diferenciais parciais
+    # dψ/dλ (longitude)
+    dpsi_dlon = np.gradient(psi_p, dlon[1], axis=1)
+    # dψ/dφ (latitude)
+    dpsi_dlat = np.gradient(psi_p, dlat[1], axis=0)
+    
+    # d²ψ/dλ² (segunda derivada em longitude)
+    d2psi_dlon2 = np.gradient(dpsi_dlon, dlon[1], axis=1)
+    # d²ψ/dφ² (segunda derivada em latitude)
+    d2psi_dlat2 = np.gradient(dpsi_dlat, dlat[1], axis=0)
+    # d²ψ/(dλ dφ) (mista)
+    d2psi_dlondlat = np.gradient(dpsi_dlat, dlon[1], axis=1)
+    
+    # Termos finais
+    termxu = dpsi_dlon * dpsi_dlon - psi_p * d2psi_dlon2
+    termxv = dpsi_dlon * dpsi_dlat - psi_p * d2psi_dlondlat
+    termyv = dpsi_dlat * dpsi_dlat - psi_p * d2psi_dlat2
+    
+    #coefficient
+    p_lev=250 #unit in hPa
+    p=p_lev/1000.0
+    magU=np.sqrt(u_c**2+v_c**2)
+    coeff=((p*cos_lat)/(2*magU.T)).T
+    #x-component of TN-WAF
+    px=(coeff.T/(a*a*cos_lat)).T * (((u_c.T)/cos_lat).T*termxu+v_c*termxv)
+    #y-component of TN-WAF
+    py=(coeff.T/(a*a)).T * (((u_c.T)/cos_lat).T*termxv+v_c*termyv)
+    
+    # Calculo da divergencia - todo o globo
+    dx, dy = mpcalc.lat_lon_grid_deltas(lon, lat)  #Atribui DX e DY
+    divergencia = mpcalc.divergence(px, py, dx = dx, dy = dy, x_dim=- 1, y_dim=- 2) *  1e6
+    
+    # Plot ------------------------------- 
+    
+    # Filtrando os dados para o Hemisfério Sul (latitudes negativas)
+    lat_south = lat[lat < 0]  # Seleciona apenas latitudes negativas
+    lat_indices = np.where(lat < 0)[0]  # Índices correspondentes
+
+    # Restrinja os dados ao Hemisfério Sul
+    #psi_p_south = psi_p[:, lat_indices, :] 
+    psi_p_south = psi_p[lat_indices, :]
+    psi_p1_south, lon1 = addcyclic(psi_p_south, lon)
+    
+    divergencia_south = divergencia[lat_indices, :]
+    
+    # Selecionando os dados ao Hemisfério Sul
+    px_south = px[lat_indices, :]
+    py_south = py[lat_indices, :]
+        
+    # Processando a matriz psi_p para garantir que seja 2D
+    psi_p1_2d = psi_p1_south[:, :]  # Seleciona o tempo 0
+    
+    # Configuração do gráfico
+    plt.figure(figsize=(25, 20))
+    ax = plt.axes(projection=ccrs.PlateCarree(central_longitude=180))
+    ax.set_extent([-180, 180, -90, -14], crs=ccrs.PlateCarree())
+    
+    # Grade
+    gl = ax.gridlines(
+        crs=ccrs.PlateCarree(), color='gray', alpha=1.0, linestyle='--',
+        linewidth=0.5, xlocs=np.arange(-180, 181, 30), 
+        ylocs=np.arange(-90, 1, 30), draw_labels=True)
+    gl.top_labels = False
+    gl.right_labels = False
+    gl.xlabel_style = {'size': 29, 'color': 'black'}
+    gl.ylabel_style = {'size': 29, 'color': 'black'}
+    
+    #colors =['#053061','#124984','#327cb7','#599ec3','#bedbec','#ffffff','#f8bfa4',
+    #         '#e58368','#c43b3c','#8a0b25','#690020']
+    
+    colors =['#313695', '#4575b4', '#74add1', '#abd9e9', '#e0f3f8', '#ffffff',
+    '#fee090', '#fdae61', '#f46d43', '#d73027', '#a50026']
+
+    levels = [-4, -3, -2, -1, -0.5, 0.5, 1, 2, 3, 4]
+    
+    # Intervalos e Contornos
+    #levels = np.arange(-6, 7, 1)
+    lonsn, latsn = np.meshgrid(lon1[:-1], lat_south)
+    
+    # Plot da divergencia (shaded)
+    cf = ax.contourf(lonsn,
+                      latsn, 
+                      divergencia_south, 
+                      #cmap='RdYlBu_r', 
+                      cmap=LinearSegmentedColormap.from_list('teste', colors, N=len(levels) - 1),
+                      levels=levels, 
+                      extend='both'
+                      )
+    
+    level= np.arange(-8, 8, 1)
+    # Adicionar contorno - Plot da função corrente psi_p
+    c = ax.contour( lonsn, 
+                    latsn, 
+                    psi_p_south / 1e6, 
+                    colors='black', 
+                    linewidths=1.5, 
+                    levels=level
+                    )
+    ax.clabel(c, c.levels, fontsize=25)
+    
+    # Vetores
+    
+    #Interpolando para que os dados possam ser plotados 
+    time = np.arange(45)  # Supondo 45 instantes de tempo no px e py
+    
+    # Criando os DataArrays corretamente
+    # px_da = xr.DataArray(
+    #     px_south,
+    #     dims=["time", "lat", "lon"],
+    #     coords={"time": time, "lat": lat_south, "lon": lon1[:-1]},  # Ajusta lon1 para 180 longitudes
+    # )
+    
+    # py_da = xr.DataArray(
+    #     py_south,
+    #     dims=["time", "lat", "lon"],
+    #     coords={"time": time, "lat": lat_south, "lon": lon1[:-1]},  # Ajusta lon1 para 180 longitudes
+    # )
+    
+    # Coordenadas da nova grade (convertendo latsn e lonsn para 1D)
+    new_lat = latsn[:, 0]  # Assume que todas as colunas de latsn são iguais
+    new_lon = lonsn[0, :]  # Assume que todas as linhas de lonsn são iguais
+    
+    # # Interpolando para a nova grade
+    #px_interp = px_da.interp(lat=new_lat, lon=new_lon)
+    #py_interp = py_da.interp(lat=new_lat, lon=new_lon)
+    
+    time_index = 0
+    #px_2d = px_interp.isel(time=time_index)
+    #py_2d = py_interp.isel(time=time_index)
+    
+    # Plotando os vetores com ax.quiver
+    # lons, lats = np.meshgrid(lonsn, latsn)
+    # # Espaçamento dos vetores
+    # step_y=3
+    # step_x=3
+    
+    # v = ax.quiver(
+    #     lonsn[0:59:step_y,::step_x],  # Longitude # lonsn[::step, ::step]
+    #     latsn[0:59:step_y,::step_x],  # Latitude  # latsn[::step, ::step]
+    #     px_south[0:59:step_y,::step_x],  # Componente U 
+    #     py_south[0:59:step_y,::step_x],  # Componente V
+    #     pivot='mid',
+    #     width=0.0025,
+    #     scale=50,
+    #     headwidth=5
+    #     )
+    
+    #vk = ax.quiverkey(v, 0.76, 0.8, 25, r'25 m$^2$/s$^2$', labelpos='E',coordinates='figure')
+    #ax.quiver(lonsn,latsn,px_2d,py_2d,pivot='mid',width=0.0025,headwidth=3)
+    
+    #qk = ax.quiverkey(v, 0.76, 0.8, 25, r'25 m$^2$/s$^2$', labelpos='E', coordinates='figure')
+    
+    # Elementos do mapa
+    ax.coastlines(resolution='10m', color='black', linewidth=1)
+    ax.add_feature(cfeature.BORDERS, edgecolor='black', linewidth=1)
+    ax.add_feature(cfeature.LAND)
+    
+    # Barra de cores
+    cbar = plt.colorbar(cf, ax=ax, orientation='horizontal', pad=0.05, aspect=50)
+    cbar.ax.tick_params(labelsize=29)
+    #cbar.set_label('Stream function anomalies ($\psi^\prime$ in 10$^6$ m$^2$/s)', size=20)
+    #cbar.set_label('Divergence (10$^6$ m$^2$/s)', size=20)
+    #plt.title("Takaya & Nakamura Wave Activity Flux (Hemisfério Sul)", fontsize=20)
+    
+    plt.savefig(f'/home/tn_div_anos_{key}.png', bbox_inches='tight')
+    plt.show()
