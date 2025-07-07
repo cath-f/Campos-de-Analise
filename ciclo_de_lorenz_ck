@@ -1,0 +1,254 @@
+# Perfil vertical da anomalia de Conversões Barotrópicas baseada no Ciclo de Energia de Lorenz
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Sat Jun 24 16:13:54 2023
+
+@author: catharine
+"""
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Sat Jun 24 16:13:54 2023
+@author: catharine
+"""
+# ------- * Script para Conversões Barotrópicas (Ck) * ------- 
+
+import xarray as xr
+import numpy as np
+import pandas as pd
+import sympy as sym 
+
+import matplotlib.pyplot as plt
+# import matplotlib as mpl
+# import cartopy.feature as cfeature
+# import cartopy.crs as ccrs
+# from cartopy.feature import NaturalEarthFeature
+# from cartopy.io.shapereader import Reader
+
+u = xr.open_dataset('/home/catharine/2_IC_CICLO_LORENZ/era5_diario_u_91_20.nc')
+v = xr.open_dataset('/home/catharine/2_IC_CICLO_LORENZ/era5_diario_v_91_20.nc')
+
+uc = xr.open_dataset('/home/catharine/2_IC_CICLO_LORENZ/era5_climatologia_u.nc')
+vc = xr.open_dataset('/home/catharine/2_IC_CICLO_LORENZ/era5_climatologia_v.nc')
+
+up = xr.open_dataset('/home/catharine/2_IC_CICLO_LORENZ/era5_pertubacao_u.nc')
+vp = xr.open_dataset('/home/catharine/2_IC_CICLO_LORENZ/era5_pertubacao_v.nc')
+
+# Obtendo lon e lat
+lon = u['longitude'].values
+lat = u['latitude'].values
+
+# Criação de grade bidimensional a partir de lon e lat
+lon_grid, lat_grid = np.meshgrid(lon, lat)
+
+lon_grid = np.array(lon_grid)
+lat_grid = np.array(lat_grid)
+
+
+lat_da = xr.DataArray(lat_grid, dims=('latitude', 'longitude'), coords={'latitude': lat, 'longitude': lon})
+lon_da = xr.DataArray(lon_grid, dims=('latitude', 'longitude'), coords={'latitude': lat, 'longitude': lon})
+
+# Manipulando tempo
+data_inicial = pd.to_datetime('1991-09-01')
+data_final = pd.to_datetime('2020-09-30')
+
+# Definindo variáveis
+g = 9.8
+#niveis = [200, 300, 400, 500, 600, 700, 800, 900, 1000]
+#longitude_sel = 299.25 # continente - em 360 para uma resolução de 0.75
+#longitude_sel = -40 #319.5 # 319.5 (40) e 314.25 (45) oceano - em 360 para uma resolução de 0.75
+
+# mba_1='1991, 2009, 1997, 1994'
+# mba_2='2002, 2006, 1987'
+# mba_3='1995, 2010'
+# mwd_1='2009, 1997, 2006, 1991, 1987'
+# mwd_2='1995'
+# mwd_3='2010'
+
+# Niveis
+niveis = [1000, 900, 800, 700, 600, 500, 400, 300, 200, 100]
+
+# Listas de anos
+anos_list = {'anos_1': [], #Adicionar anos
+             'anos_2': []
+             }
+
+#Longitudes Selecionadas
+lon_list= [-40]#, -65, -65, -40, -65, -65, -45]
+
+datas = pd.date_range(data_inicial, data_final, freq='D')
+# anos = [2010]
+dias = range(1, 31)
+# Loop para calcular compostos com determinadas longitudes para determinado conjunto de anos
+for (key, anos), longitude_sel in zip(anos_list.items(), lon_list):
+    
+    ck=[]
+        
+    for nivel in niveis:
+        ano_en=[]
+        for ano in anos:
+            EN1=[]
+            for dia in dias:
+                if dia < 10:
+                    dia_novo = f'0{dia}'
+                                    
+                    # Extrair a variável 'up' com o nível atual
+                    up_nivel = up['u'].sel(valid_time="{}-09-{}".format(ano,dia_novo), pressure_level=nivel, latitude=lat_da, longitude=lon_da).values.squeeze()
+                    vp_nivel = vp['v'].sel(valid_time="{}-09-{}".format(ano,dia_novo), pressure_level=nivel, latitude=lat_da, longitude=lon_da).values.squeeze()
+                                    
+                    # Calcular o quadrado de 'up_nivel'
+                    uu = up_nivel * up_nivel
+                    vv = vp_nivel * vp_nivel
+                    uv = up_nivel * vp_nivel
+                    
+                    # np.resize() altera o tamanho total do array, preenchendo ou truncando os dados conforme necessário.
+                    # lat e lon  uu= np.resize(uu, (240, 479))
+                    uu= np.resize(uu, (360, 241))
+                    vv= np.resize(vv, (360, 241))
+                    uv= np.resize(uv, (360, 241))
+                    
+                    dx = (sym.diff(up.longitude, dim='longitude')*np.pi/180) *6.37e6*np.cos(up.latitude*np.pi/180)
+                    dy = (sym.diff(up.latitude, dim='latitude')*np.pi/180) *6.37e6
+                    dy = np.array(dy)
+                    dy = dy[:, np.newaxis]
+                    
+                    #dy.shape
+                    #Out[165]: (240,)
+                    
+                    # Para dx: xarray.DataArray (longitude: 479, latitude: 241) 
+                    # Coordinates:
+                    #  * longitude  (longitude) float32 0.75 1.5 2.25 3.0 ... 357.0 357.8 358.5 359.2
+                    #  * latitude   (latitude) float32 90.0 89.25 88.5 87.75 ... -88.5 -89.25 -90.0
+                    
+                    dx= dx.transpose()
+                    dx= np.resize(dx, (360, 241))
+    
+                    dux = sym.diff(uc['u'].sel(valid_time='2020-09-{}'.format(dia_novo), pressure_level=nivel), dim='longitude').squeeze()
+                    duy = sym.diff(uc['u'].sel(valid_time='2020-09-{}'.format(dia_novo), pressure_level=nivel), dim='latitude').squeeze()
+                    dvx = sym.diff(vc['v'].sel(valid_time='2020-09-{}'.format(dia_novo), pressure_level=nivel), dim='longitude').squeeze()
+                    dvy = sym.diff(vc['v'].sel(valid_time='2020-09-{}'.format(dia_novo), pressure_level=nivel), dim='latitude').squeeze()
+                       
+                    # dux.shape
+                    # Out[54]: (241, 479)
+                    
+                    dux= np.resize(dux, (360, 241))
+                    dvx= np.resize(dvx, (360, 241))
+                    duy= np.resize(duy, (360, 241))
+                    dvy= np.resize(dvy, (360, 241))
+                    
+        
+                    en1 = (uu*(dux/dx)+uv*(duy/dy)+uv*(dvx/dx)+vv*(dvy/dy))
+    
+                else:  
+                    
+                    # Extrair a variável 'up' com o nível atual
+                    # Extrair a variável 'up' com o nível atual
+                    up_nivel = up['u'].sel(valid_time="{}-09-{}".format(ano,dia_novo), pressure_level=nivel, latitude=lat_da, longitude=lon_da).values.squeeze()
+                    vp_nivel = vp['v'].sel(valid_time="{}-09-{}".format(ano,dia_novo), pressure_level=nivel, latitude=lat_da, longitude=lon_da).values.squeeze()
+                                    
+                    # Calcular o quadrado de 'up_nivel'
+                    uu = up_nivel * up_nivel
+                    vv = vp_nivel * vp_nivel
+                    uv = up_nivel * vp_nivel
+                    
+                    # np.resize() altera o tamanho total do array, preenchendo ou truncando os dados conforme necessário.
+                    
+                    uu= np.resize(uu, (360, 241))
+                    vv= np.resize(vv, (360, 241))
+                    uv= np.resize(uv, (360, 241))
+                    
+                    dx = (sym.diff(up.longitude, dim='longitude')*np.pi/180) *6.37e6*np.cos(up.latitude*np.pi/180)
+                    dy = (sym.diff(up.latitude, dim='latitude')*np.pi/180) *6.37e6
+                    dy = np.array(dy)
+                    dy = dy[:, np.newaxis]
+                    
+                    #dy.shape
+                    #Out[165]: (240,)
+                    
+                    # Para dx: xarray.DataArray (longitude: 479, latitude: 241) 
+                    # Coordinates:
+                    #  * longitude  (longitude) float32 0.75 1.5 2.25 3.0 ... 357.0 357.8 358.5 359.2
+                    #  * latitude   (latitude) float32 90.0 89.25 88.5 87.75 ... -88.5 -89.25 -90.0
+                    
+                    dx= dx.transpose()
+                    dx= np.resize(dx, (360, 241))
+                    # No calculo a latitude perde 1 valor, 241 -> 240. Modificar 
+    
+                    dux = sym.diff(uc['u'].sel(valid_time='2020-09-{}'.format(dia_novo), pressure_level=nivel), dim='longitude').squeeze()
+                    duy = sym.diff(uc['u'].sel(valid_time='2020-09-{}'.format(dia_novo), pressure_level=nivel), dim='latitude').squeeze()
+                    dvx = sym.diff(vc['v'].sel(valid_time='2020-09-{}'.format(dia_novo), pressure_level=nivel), dim='longitude').squeeze()
+                    dvy = sym.diff(vc['v'].sel(valid_time='2020-09-{}'.format(dia_novo), pressure_level=nivel), dim='latitude').squeeze()
+                       
+                    # dux.shape
+                    # Out[54]: (241, 479)
+                    
+                    
+                    dux= np.resize(dux, (360, 241))
+                    dvx= np.resize(dvx, (360, 241))
+                    duy= np.resize(duy, (360, 241))
+                    dvy= np.resize(dvy, (360, 241))
+                        
+                    en1 = (uu*(dux/dx)+uv*(duy/dy)+uv*(dvx/dx)+vv*(dvy/dy))
+              
+                en = en1#+((-1 * en1) / g)    
+                EN1.append(en)
+                
+            med_dia=np.mean(EN1, axis=0)
+            ano_en.append(med_dia)
+        
+        med_ano=np.mean(ano_en, axis=0)    
+        ck.append(med_ano)
+    
+    # ------------
+    
+    # Selecionando os dados de latitude, longitude e pk para a região desejada
+    longitude_titulo=round(longitude_sel)
+    latitude_inicio = 0
+    latitude_fim = -50
+    
+    # Selecionando os dados de latitude, longitude e pk para a região desejada
+    # longitude_sel = 320.25
+    # longitude_titulo = round(longitude_sel - 360)
+    
+    #lat_index = np.where((lat >= latitude_fim) & (lat <= latitude_inicio))[0]
+    lon_index = np.where(lon == longitude_sel)[0]
+    lat_index = np.where((lat >= latitude_fim) & (lat <= latitude_inicio))[0]
+    
+    ck_sel = np.array(ck)[:, lat_index, lon_index].squeeze()
+    
+    plt.figure(figsize=(25,20))
+    plt.rc('font',size=30)
+    #plt.figure()
+    #lat_index=(lat_index*(-0.75))+90 # Ajustando o ponto de grade ao valor da latitude
+    lat_index=(lat_index*(-0.25))
+    levs = np.arange(-0.009, 0.010, 0.002)  # Ajuste da barra de cores
+    
+    #plt.contourf(np.arange(len(lat_index)), niveis, pk_sel, cmap='seismic', pressure_levels=levs, extend='both')
+    plt.contourf(lat_index, niveis, ck_sel, levels=levs, cmap='seismic', extend='both')
+    plt.gca().invert_yaxis()  # Inverter o eixo y para que os níveis de pressão aumentem de baixo para cima
+    plt.colorbar()
+    plt.yscale('log')  # Define a escala logarítmica no eixo y
+    
+    # Define os ticks e rótulos personalizados
+    yticks = [100, 200, 300, 400, 500, 600, 700, 800, 900, 1000]
+    yticklabels = ['100', '200', '300', '400', '500', '600', '700', '800', '900', '1000']
+    plt.yticks(yticks, yticklabels)
+    
+    # Define os ticks e rótulos personalizados
+    #xticks = [-50, -45, -40, -35, -30, -25, -20, -15, -10, -5, 0]
+    #xticklabels = ['-50', '-45', '-40', '-35', '-30', '-25', '-20', '-15', '-10', '-5', '0']
+    #plt.xticks(xticks, xticklabels)
+    
+    # Legendas
+    plt.xlabel('Latitude')
+    plt.ylabel('hPa')
+    #plt.title(f'Perfil Vertical da Conversão Barotrópica (CK) - Longitude {longitude_titulo}ºW \n ', fontsize=30, loc='center')
+    plt.title(f"Longitude:{longitude_sel}°",
+              fontweight='bold', 
+              fontsize=30, 
+              loc='right'
+              )
+    plt.grid(True)
+#    plt.savefig(f'/home/catharine/2_IC_RESULTADOS/ck/ck_{key}.png', bbox_inches='tight')
+    plt.show()
