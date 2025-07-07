@@ -1,0 +1,157 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Tue Dec 31 15:11:27 2024
+
+@author: catharine
+"""
+# Importando bibliotecas 
+from scipy import stats
+import cartopy.crs as ccrs
+import cartopy.feature as cfeature
+import matplotlib.pyplot as plt
+import matplotlib.colors 
+import metpy.calc as mpcalc
+from metpy.units import units
+import numpy as np
+import xarray as xr
+import cartopy.io.shapereader as shpreader # Import shapefiles
+import cmocean
+import matplotlib.colors as mcolors
+from matplotlib.colors import LinearSegmentedColormap
+
+# ignora avisos
+import warnings
+warnings.filterwarnings("ignore")
+
+""" Script de Anomalia de Temperatura da Superficie do Mar ;) """
+
+# Abrindo os dados 
+file_1 = xr.open_mfdataset(
+    '/home/catharine/2_IC_DADOS/sst.mnmean.nc'
+    ).metpy.parse_cf().sel(time=slice('1991-09-01T00:00:00',
+                                      '2020-09-01T00:00:00')) #'2024-05-12T18:00:00'
+
+# Selecionando apenas o mes de setembro
+file_setembro = file_1.sel(time=file_1['time'].dt.month == 9)
+                                      
+# Obtendo lon e lat
+lon = file_setembro['lon'].values
+lat = file_setembro['lat'].values
+
+# Criação de grade bidimensional a partir de lon e lat
+lon_grid, lat_grid = np.meshgrid(lon, lat)
+
+# Se necessário, ajustar a longitude para [-180, 180] posteriormente:
+file_setembro = file_setembro.assign_coords(dict(
+    lon=(((file_setembro.lon + 180) % 360) - 180)  # Opcional, para [-180, 180]
+)).sortby('lon')
+
+# Iniciando os calculos
+
+# Climatologia
+clima_sst = np.mean(file_setembro['sst'], axis=0)
+
+# Listas de anos
+anos_list = {
+            'anos_1': [], #Adicionar anos 
+            'anos_2': [],
+            }
+
+# Loop para calcular compostos e plotar
+for key, anos in anos_list.items():
+    # Seleciona os dados dos anos especificados
+    dados = file_setembro.sel(time=file_setembro['time'].dt.year.isin(anos))
+
+    # Calcula os compostos
+    anomalia_sst = dados['sst'].mean(dim='time') - clima_sst
+    
+    # Calcula o teste t (amostras DEPENDENTES)
+    st, p = stats.ttest_1samp(dados['sst'] - clima_sst, popmean=0, axis=0, nan_policy='omit')
+    # Ajusta a máscara para valores não significativos para 90%
+    p = np.ma.masked_where(p > 0.1, p)
+    
+    # Calcula o teste t (amostras INDEPENDENTES)
+    #st, p = stats.ttest_ind()
+    #p = np.ma.masked_where(np.nanmean(nome_variavel, axis=0) < 1, p)
+
+    # Plotando os resultados
+    plt.figure(figsize=(25, 25))
+    ax = plt.axes(projection=ccrs.PlateCarree(central_longitude=180))
+    ax.set_extent([-180, 180, -90, 90], crs=ccrs.PlateCarree())
+
+    # Grade
+    gl = ax.gridlines(crs=ccrs.PlateCarree(),
+                      color='gray',
+                      alpha=1.0, 
+                      linestyle='--', 
+                      linewidth=0.5,
+                      xlocs=np.arange(-180, 181, 30), 
+                      ylocs=np.arange(-90, 91, 30), 
+                      draw_labels=True)
+    gl.top_labels = False
+    gl.right_labels = False
+    gl.xlabel_style = {'size': 29, 'color': 'black'}
+    gl.ylabel_style = {'size': 29, 'color': 'black'}
+
+    # Intervalos
+    #levels = np.arange(-1.4, 1.5, 0.1)
+    
+    
+    colors = ['#313695', '#4575b4', '#74add1', '#abd9e9', '#e0f3f8', 
+    '#ffffff','#ffe0e0', '#ff6969','#ff2c2c',  '#b40000', '#800000']
+
+    # colors =['#313695', '#4575b4', '#74add1', '#abd9e9', '#e0f3f8', '#ffffff',
+    #     '#fee090', '#fdae61', '#f46d43', '#d73027', '#a50026']
+
+    levels = [-1.2, -0.9, -0.6, -0.3, -0.1, 0.1, 0.3, 0.6, 0.9, 1.2]
+    # Plota TSM
+    
+    sst = ax.contourf(
+        lon, 
+        lat, 
+        anomalia_sst, 
+        cmap = LinearSegmentedColormap.from_list('seismic_20', colors, N=len(colors)),
+        levels=levels, 
+        extend='both'
+        )
+
+    # Contornos para valores significativos
+    ax.contourf(lon,
+                lat,
+                p,
+                hatches=['//'],
+                latlon=True,
+                levels=np.array([0,0.1]),
+                colors='none'
+                )
+    
+    # #contorno da área de significância
+    # ax.contour(lon,
+    #            lat,
+    #            p, 
+    #            latlon=True,
+    #            colors='k',
+    #            linewidths=1.0,
+    #            levels=np.array([0,0.1])
+    #            )
+
+    # Elementos do mapa
+    ax.coastlines(resolution='10m', color='black', linewidth=1)
+    ax.add_feature(cfeature.BORDERS, edgecolor='black', linewidth=1)
+    ax.add_feature(cfeature.LAND)
+
+    # Barra de cores
+    barra_de_cores = plt.colorbar(sst,
+                                  orientation='horizontal', 
+                                  pad=0.04, 
+                                  fraction=0.04
+                                  )
+    barra_de_cores.ax.set_label('(K)')
+    barra_de_cores.ax.tick_params(labelsize=29)
+
+    # Salva a figura
+    plt.savefig(f'/home/tsm_{key}.png', bbox_inches='tight')
+    plt.show()
+    plt.close()
+    
