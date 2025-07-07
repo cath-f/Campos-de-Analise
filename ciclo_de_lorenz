@@ -1,0 +1,155 @@
+# Perfil vertical da anomalia da Conversão Baroclinica baseada no Ciclo de Energia de Lorenz
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Mon Jul 24 14:00:31 2023
+
+@author: catharine
+"""
+#Script para Conversão Baroclinica Pk
+#-R/P* w'T'
+
+import xarray as xr
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
+tp = xr.open_dataset('/home/catharine/2_IC_CICLO_LORENZ/era5_pertubacao_t.nc')
+wp = xr.open_dataset('/home/catharine/2_IC_CICLO_LORENZ/era5_pertubacao_w.nc')
+
+# Obtendo lon e lat
+lon = tp['longitude'].values
+lat = tp['latitude'].values
+
+# Criação de grade bidimensional a partir de lon e lat
+lon_grid, lat_grid = np.meshgrid(lon, lat)
+
+lon_grid = np.array(lon_grid)
+lat_grid = np.array(lat_grid)
+
+lat_da = xr.DataArray(lat_grid, dims=('latitude', 'longitude'), coords={'latitude': lat, 'longitude': lon})
+lon_da = xr.DataArray(lon_grid, dims=('latitude', 'longitude'), coords={'latitude': lat, 'longitude': lon})
+
+
+# Manipulando tempo
+data_inicial = pd.to_datetime('1981-09-01')
+data_final = pd.to_datetime('2010-09-30')
+
+# Definindo variáveis
+g = 9.8
+R= 287.053
+# niveis = [100, 200, 300, 400, 500, 600, 700, 800, 900, 1000]
+# #longitude_sel = 299.25 # continente - em 360 para uma resolução de 0.75
+# longitude_sel = 319.5 # 319.5 (40) e 314.25 (45) oceano - em 360 para uma resolução de 0.75
+
+# mba_1='1991, 2009, 1997, 1994'
+# mba_2='2002, 2006, 1987'
+# mba_3='1995, 2010'
+# mwd_1='2009, 1997, 2006, 1991, 1987'
+# mwd_2='1995'
+# mwd_3='2010'
+
+# Niveis
+niveis = [1000, 900, 800, 700, 600, 500, 400, 300, 200, 100]
+
+# Listas de anos
+anos_list = {'anos_1': [], #adicionar os anos
+             'anos_2': []
+             }
+
+#Longitudes Selecionadas
+lon_list= [-40]#, -65, -65, -40, -65, -65, -45]
+
+datas = pd.date_range(data_inicial, data_final, freq='D')
+#anos = [2010]
+dias = range(1, 31)
+
+# Loop para calcular compostos com determinadas longitudes para determinado conjunto de anos
+for (key, anos), longitude_sel in zip(anos_list.items(), lon_list):
+
+    pk=[]
+        
+    for nivel in niveis:
+        ano_wt=[]
+        for ano in anos:
+            WT=[]
+            for dia in dias:
+                if dia < 10:
+                    dia_novo = f'0{dia}'
+                                    
+                    # Calculando conversão
+                    
+                    tp_nivel = tp['t'].sel(valid_time="{}-09-{}".format(ano,dia_novo), pressure_level=nivel, latitude=lat_da, longitude=lon_da).values.squeeze()
+                    wp_nivel = wp['w'].sel(valid_time="{}-09-{}".format(ano,dia_novo), pressure_level=nivel, latitude=lat_da, longitude=lon_da).values.squeeze()
+                    
+                    wt=(((R/(nivel*100))*((wp_nivel)*tp_nivel)))*(-1)
+    
+                else:  
+                    
+                    # Calculando conversão
+                    tp_nivel = tp['t'].sel(valid_time="{}-09-{}".format(ano,dia_novo), pressure_level=nivel, latitude=lat_da, longitude=lon_da).values.squeeze()
+                    wp_nivel = wp['w'].sel(valid_time="{}-09-{}".format(ano,dia_novo), pressure_level=nivel, latitude=lat_da, longitude=lon_da).values.squeeze()
+                    
+                    wt=(((R/(nivel*100))*((wp_nivel)*tp_nivel)))*(-1)
+       
+                WT.append(wt)
+                
+            med_dia=np.mean(WT, axis=0)
+            ano_wt.append(med_dia)
+           
+        med_ano=np.mean(ano_wt,axis=0)  
+        pk.append(med_ano)
+    
+    
+    # Selecionando os dados de latitude, longitude e pk para a região desejada
+    # longitude_titulo=round(359.25 - longitude_sel)
+    longitude_titulo=round(longitude_sel)
+    latitude_inicio = 0
+    latitude_fim = -50
+    
+    # Selecionando os dados de latitude, longitude e pk para a região desejada
+    # longitude_sel = 320.25
+    # longitude_titulo = round(longitude_sel - 360)
+    
+    lat_index = np.where((lat >= latitude_fim) & (lat <= latitude_inicio))[0]
+    lon_index = np.where(lon == longitude_sel)[0]
+    
+    pk_sel = np.array(pk)[:, lat_index, lon_index].squeeze()
+    
+    plt.figure(figsize=(25,20))
+    plt.rc('font',size=30)
+    #plt.figure()
+    #lat_index=(lat_index*(-0.75))+90 # Ajustando o ponto de grade ao valor da latitude
+    lat_index=(lat_index*(-0.25))
+    levs = np.arange(-0.009, 0.010, 0.002)  # Ajuste da barra de cores
+    
+    #plt.contourf(np.arange(len(lat_index)), niveis, pk_sel, cmap='seismic', levels=levs, extend='both')
+    plt.contourf(lat_index, niveis, pk_sel, cmap='seismic', levels=levs, extend='both')
+    plt.gca().invert_yaxis()  # Inverter o eixo y para que os níveis de pressão aumentem de baixo para cima
+    plt.colorbar()
+    plt.yscale('log')  # Define a escala logarítmica no eixo y
+    
+    # Define os ticks e rótulos personalizados
+    yticks = [100, 200, 300, 400, 500, 600, 700, 800, 900, 1000]
+    yticklabels = ['100','200', '300', '400', '500', '600', '700', '800', '900', '1000']
+    plt.yticks(yticks, yticklabels)
+    
+    # # Define os ticks e rótulos personalizados
+    # xticks = [-50, -45, -40, -35, -30, -25, -20, -15, -10, -5, -0, 5, 10]
+    # xticklabels = ['-50', '-45', '-40', '-35', '-30', '-25', '-20', '-15', '-10', '-5', '0', '5', '10']
+    # plt.xticks(xticks, xticklabels)
+    
+    # Legendas
+    plt.xlabel('Latitude')
+    plt.ylabel('hPa')
+    #plt.title(f'Perfil Vertical da Conversão Baroclínica (PK) - Longitude {longitude_titulo}ºW \n ', fontsize=30, loc='center')
+    plt.title(f"Longitude:{longitude_sel}°",
+              fontweight='bold', 
+              fontsize=30, 
+              loc='right'
+              )
+    plt.grid(True)
+    # Salvar imagem
+    plt.savefig(f'/home/catharine/2_IC_RESULTADOS/pk/pk_{key}.png', bbox_inches='tight')
+    plt.show()
+
