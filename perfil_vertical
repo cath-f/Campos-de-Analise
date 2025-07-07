@@ -1,0 +1,275 @@
+#Perfil vertical de Anomalias de Temperatura, Componente u e v, Omega
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Tue Jan 28 17:46:21 2025
+
+@author: catharine
+"""
+# Importando bibliotecas 
+from scipy import stats
+import cartopy.crs as ccrs
+import cartopy.feature as cfeature
+import matplotlib.pyplot as plt
+import matplotlib.colors 
+import metpy.calc as mpcalc
+from metpy.units import units
+import numpy as np
+import xarray as xr
+import cartopy.io.shapereader as shpreader # Import shapefiles
+import cmocean
+import matplotlib.colors as mcolors
+from matplotlib.ticker import LogLocator, FuncFormatter
+
+# ignora avisos
+import warnings
+warnings.filterwarnings("ignore")
+
+""" Script Perfil Vertical ;) """
+
+# Abrindo os dados 
+file_1 = xr.open_mfdataset(
+    '/home/catharine/2_IC_DADOS/era5_windy_v_100_1000hpa.nc'
+    ).metpy.parse_cf().sel(valid_time=slice('1991-09-01T00:00:00',
+                                      '2020-09-01T00:00:00')) #'2024-05-12T18:00:00'
+ 
+file_2 = xr.open_mfdataset(
+    '/home/catharine/2_IC_DADOS/era5_omega_100_1000hpa.nc'
+    ).metpy.parse_cf().sel(valid_time=slice('1991-09-01T00:00:00',
+                                      '2020-09-01T00:00:00'))
+ 
+file_3 = xr.open_mfdataset(
+    '/home/catharine/2_IC_DADOS/era5_wind_u_100_1000hpa.nc'
+    ).metpy.parse_cf().sel(valid_time=slice('1991-09-01T00:00:00',
+                                      '2020-09-01T00:00:00'))
+                                            
+file_4 = xr.open_mfdataset(
+    '/home/catharine/2_IC_DADOS/perfil_temp.nc'
+    ).metpy.parse_cf().sel(valid_time=slice('1991-09-01T00:00:00',
+                                      '2020-09-01T00:00:00'))
+                                            
+                                    
+# Selecionando apenas o mes de setembro
+#file_setembro = file_1.sel(time=file_1['time'].dt.month == 9)
+                                      
+# Obtendo lon e lat
+lon = file_1['longitude'].values
+lat = file_1['latitude'].values
+
+# Criação de grade bidimensional a partir de lon e lat
+lon_grid, lat_grid = np.meshgrid(lon, lat)
+
+# Se necessário, ajustar a longitude para [-180, 180] posteriormente:
+file_1 = file_1.assign_coords(dict(
+    lon=(((file_1.longitude + 180) % 360) - 180)  # Opcional, para [-180, 180]
+           )).sortby('longitude')
+
+file_2 = file_2.assign_coords(dict(
+    lon=(((file_2.longitude + 180) % 360) - 180)  # Opcional, para [-180, 180]
+           )).sortby('longitude')
+
+file_3 = file_3.assign_coords(dict(
+    lon=(((file_3.longitude + 180) % 360) - 180)  # Opcional, para [-180, 180]
+           )).sortby('longitude')
+
+file_4 = file_4.assign_coords(dict(
+    lon=(((file_4.longitude + 180) % 360) - 180)  # Opcional, para [-180, 180]
+           )).sortby('longitude')
+
+# Iniciando os calculos
+# Climatologia
+clima_v = np.mean(file_1['v'], axis=0)
+clima_w = np.mean(file_2['w'], axis=0)
+clima_u = np.mean(file_3['u'], axis=0)
+clima_t = np.mean(file_4['t'], axis=0)
+
+# Niveis
+niveis = [1000, 900, 800, 700, 600, 500, 400, 300, 200, 100]
+
+# Listas de anos
+anos_list = {'anos_1': [], #Adicionar anos
+             'anos_2': [],
+            }
+
+#Longitudes Selecionadas
+lon_list= [-40, -65, -65, -45, -65, -65, -45]
+
+# Loop para calcular compostos e plotar
+#for key, anos in anos_list.items():
+
+# Loop para calcular compostos com determinadas longitudes
+for (key, anos), longitude_sel in zip(anos_list.items(), lon_list):
+    print(f"Processando {key} - Longitude: {longitude_sel}") 
+    # Seleciona os dados dos anos especificados
+    dados = file_1.sel(valid_time=file_1['valid_time'].dt.year.isin(anos))
+    dados2 = file_2.sel(valid_time=file_2['valid_time'].dt.year.isin(anos))
+    dados3 = file_3.sel(valid_time=file_3['valid_time'].dt.year.isin(anos))
+    dados4 = file_4.sel(valid_time=file_4['valid_time'].dt.year.isin(anos))
+    
+    # Calcula os compostos
+    anomalia_v = dados['v'].mean(dim='valid_time') - clima_v
+    anomalia_w = (dados2['w'].mean(dim='valid_time') - clima_w)*100
+    anomalia_u = dados3['u'].mean(dim='valid_time') - clima_u
+    anomalia_t = dados4['t'].mean(dim='valid_time') - clima_t
+    
+    anomalia_v = anomalia_v.sel(longitude=longitude_sel,  # Longitude específica
+                           method="nearest"  # Encontra o ponto mais próximo
+                           )
+    anomalia_w = anomalia_w.sel(longitude=longitude_sel,  # Longitude específica
+                           method="nearest"  # Encontra o ponto mais próximo
+                           )
+    
+    anomalia_u = anomalia_u.sel(longitude=longitude_sel,  # Longitude específica
+                           method="nearest"  # Encontra o ponto mais próximo
+                           )
+    
+    anomalia_t = anomalia_t.sel(longitude=longitude_sel,  # Longitude específica
+                           method="nearest"  # Encontra o ponto mais próximo
+                           )
+     
+    # Calcula o teste t (amostras DEPENDENTES)
+    st, p = stats.ttest_1samp(dados4['t'] - clima_t, popmean=0, axis=0, nan_policy='omit')
+    st, p = stats.ttest_1samp(dados4['t'], popmean=clima_t, axis=0, nan_policy='omit')
+   
+    p_da = xr.DataArray(p, coords={"pressure_level": dados4["pressure_level"],
+                                    "latitude": dados4["latitude"], 
+                                    "longitude": dados4["longitude"]}, 
+                                    dims=["pressure_level", "latitude", "longitude"])
+    
+    p = p_da.sel(longitude=longitude_sel,  # Longitude específica
+                            method="nearest"  # Encontra o ponto mais próximo
+                            )
+         
+    #Ajusta a máscara para valores não significativos para 90%
+    
+    p = p.interp(pressure_level=dados4['pressure_level'], latitude=dados4['latitude'])
+    p = np.ma.masked_where(p > 0.10, p)
+   
+    # Calcula o teste t (amostras INDEPENDENTES)
+    #st, p = stats.ttest_ind()
+    #p = np.ma.masked_where(np.nanmean(nome_variavel, axis=0) < 1, p)
+    
+    # # Outro metodo
+    # # Seleciona os dados apenas na longitude específica
+    # dados_t_lon = dados4['t'].sel(longitude=longitude_sel, method="nearest")  # Dados observados
+    # clima_t_lon = clima_t.sel(longitude=longitude_sel, method="nearest")  # Climatologia
+    
+    # # Calcula o teste t (amostras dependentes) APENAS nessa longitude
+    # st, p = stats.ttest_1samp(dados_t_lon, popmean=clima_t_lon, axis=0, nan_policy='omit')
+    
+    # # Criar um DataArray apenas para essa longitude
+    # p_da = xr.DataArray(
+    #     p,
+    #     coords={"pressure_level": dados4["pressure_level"], "latitude": dados4["latitude"]},
+    #     dims=["pressure_level", "latitude"],
+    # )
+    
+    # # Aplicar máscara para valores não significativos
+    # p = np.ma.masked_where(p_da > 0.15, p_da)
+        
+    # Plotando os resultados
+    plt.figure(figsize=(20, 25))
+    plt.rc('font',size=29)
+    
+    from matplotlib.colors import LinearSegmentedColormap
+
+    #colors = ['#124984','#327cb7','#599ec3','#bedbec','#ffffff','#f8bfa4',
+    #          '#e58368','#c43b3c','#8a0b25']
+    colors =['#053061','#124984','#327cb7','#599ec3','#bedbec','#ffffff','#f8bfa4',
+             '#e58368','#c43b3c','#8a0b25','#690020']
+
+    """ Perfil da Temperatura (t) """
+    levels = [-4, -3, -2, -1, -0.2, 0.2, 1, 2, 3, 4]
+    t = plt.contourf(lat, 
+                      niveis, 
+                      anomalia_t, 
+                      levels=levels, 
+                      #cmap='RdBu_r', 
+                      cmap=LinearSegmentedColormap.from_list('teste', colors, N=len(levels) - 1),
+                      extend='both',
+                      )
+    # Barra de cores
+    barra_de_cores = plt.colorbar(t, orientation='horizontal', pad=0.04, fraction=0.04) 
+
+    # Contornos para valores significativos
+    plt.contourf(lat,
+                niveis,
+                p,
+                hatches=['//'],
+                latlon=True,
+                levels=np.array([0,0.1]),
+                colors='none'
+                )
+
+    # """ Perfil da Componente Zonal (u) """
+    # levels = np.arange(-3, 4, 0.5)  # Ajuste da barra de cores
+    # levels = [-4, -3, -2, -1, -0.5, 0.5, 1, 2, 3, 4]
+    # u = plt.contourf(lat, 
+    #                   niveis, 
+    #                   anomalia_u, 
+    #                   levels=levels, 
+    #                   #cmap='RdBu_r', 
+    #                   cmap=LinearSegmentedColormap.from_list('teste', colors, N=len(levels) - 1), 
+    #                   extend='both',
+    #                   )
+    # # Barra de cores
+    # barra_de_cores = plt.colorbar(u, orientation='horizontal', pad=0.04, fraction=0.04)  
+
+    """" Perfil da Componente Meridional (v) """
+    # levels = np.arange(-3, 4, 0.5)  # Ajuste da barra de cores
+    # levels = [-4, -3, -2, -1, -0.5, 0.5, 1, 2, 3, 4]
+    # v = plt.contourf(lat, 
+    #                   niveis, 
+    #                   anomalia_v, 
+    #                   levels=levels, 
+    #                   #cmap='RdBu_r', 
+    #                   cmap=LinearSegmentedColormap.from_list('teste', colors, N=len(levels) - 1), 
+    #                   extend='both',
+    #                   )
+    
+    # # Barra de cores
+    # barra_de_cores = plt.colorbar(v, orientation='horizontal', pad=0.04, fraction=0.04)  
+    
+    """ Perfil de Omega (w) """
+    # levels = np.arange(-5, 6, 1)  # Ajuste da barra de cores
+    # levels = [-4, -3, -2, -1, -0.5, 0.5, 1, 2, 3, 4]
+    # w = plt.contourf(lat,
+    #                 niveis,
+    #                 anomalia_w, 
+    #                 latlon=True,
+    #                 linewidths=5,
+    #                 levels=levels,
+    #                 #cmap='RdBu_r', 
+    #                 cmap=LinearSegmentedColormap.from_list('teste', colors, N=len(levels) - 1), 
+    #                 extend='both'
+    #                 )
+    # plt.clabel(w, w.levels, fontsize=25) #coloca valores nas cores
+    
+    # Barra de cores
+    # barra_de_cores = plt.colorbar(w, orientation='horizontal', pad=0.04, fraction=0.04)
+    # barra_de_cores.ax.tick_params(labelsize=30) #coloca valores nas cores
+    
+    plt.gca().invert_yaxis()  # Inverter o eixo y para que os níveis de pressão aumentem de baixo para cima
+    plt.yscale('log')  # Define a escala logarítmica no eixo y
+    
+    # Define os ticks e rótulos personalizados
+    yticks = [100, 200, 300, 400, 500, 600, 700, 800, 900, 1000]
+    yticklabels = ['100','200', '300', '400', '500', '600', '700', '800', '900', '1000']
+    plt.yticks(yticks, yticklabels)
+
+    # Legendas
+    #plt.xlabel('Latitude')
+    #plt.ylabel('Nível de Pressão (hPa)')
+    plt.title(f"Longitude:{longitude_sel}°",
+              fontweight='bold', 
+              fontsize=30, 
+              loc='right'
+              )
+    # Salva a figura
+    plt.savefig(f'/home/catharine/2_IC_RESULTADOS/perfil_temperatura/perfil_t_{key}.png', bbox_inches='tight')
+    # plt.savefig(f'/home/catharine/2_IC_RESULTADOS/perfil_u/perfil_u_{key}.png', bbox_inches='tight')
+    # plt.savefig(f'/home/catharine/2_IC_RESULTADOS/perfil_v/perfil_v_{key}.png', bbox_inches='tight')
+    #plt.savefig(f'/home/catharine/2_IC_RESULTADOS/perfil_omega/omega_{key}.png', bbox_inches='tight')
+    
+    plt.grid(True)
+    plt.show()
